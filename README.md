@@ -20,3 +20,14 @@ cd first-pr
 ## Contributing
 
 Pull requests are welcme!
+
+## 🏰 Tower Defense
+
+Ein Browser-Tower-Defense-Spiel in einer einzigen Datei: einfach `index.html` im Browser öffnen.
+
+- 5 Türme: Pfeilturm, Kanone (Flächenschaden), Frostturm (verlangsamt), Scharfschütze, Teslaturm (Kettenblitz)
+- Jeder Turm bis Stufe 4 verbesserbar, verkaufbar und mit wählbarer Zielstrategie
+- 5 Gegnertypen inkl. Bosswellen alle 10 Wellen, steigende Schwierigkeit
+- Geschwindigkeit 1×/2×/3×, Pause, Highscore (lokal gespeichert)
+
+**Steuerung:** Linksklick bauen/auswählen · Rechtsklick/Esc abbrechen · 1–5 Turm wählen · U verbessern · S verkaufen · Leertaste nächste Welle · P Pause
