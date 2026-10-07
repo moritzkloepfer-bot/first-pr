@@ -28,7 +28,7 @@ Ein Browser-Tower-Defense-Spiel in einer einzigen Datei: einfach `index.html` im
 - 5 Türme: Pfeilturm, Kanone (Flächenschaden), Frostturm (verlangsamt), Scharfschütze, Teslaturm (Kettenblitz)
 - Jeder Turm bis Stufe 4 verbesserbar, verkaufbar und mit wählbarer Zielstrategie
 - 5 Gegnertypen inkl. Bosswellen alle 10 Wellen, steigende Schwierigkeit
-- Soundeffekte (synthetisch per Web Audio, keine Dateien), Lautstärkeregler und Stummschalten
+- Soundeffekte und Hintergrundmusik (synthetisch per Web Audio, keine Dateien) – ruhig zwischen den Wellen, treibend im Kampf, düster bei Bosswellen; Lautstärkeregler, Stummschalten, Musik separat abschaltbar
 - Geschwindigkeit 1×/2×/3×, Pause, Highscore (lokal gespeichert)
 
-**Steuerung:** Linksklick bauen/auswählen · Rechtsklick/Esc abbrechen · 1–5 Turm wählen · U verbessern · S verkaufen · Leertaste nächste Welle · P Pause · M Ton an/aus
+**Steuerung:** Linksklick bauen/auswählen · Rechtsklick/Esc abbrechen · 1–5 Turm wählen · U verbessern · S verkaufen · Leertaste nächste Welle · P Pause · M Ton an/aus · N Musik an/aus

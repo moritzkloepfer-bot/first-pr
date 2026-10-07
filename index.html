@@ -83,6 +83,7 @@
     <span class="stat">🌊 Welle: <b id="wave">0</b></span>
     <span class="stat">⭐ Punkte: <b id="score">0</b></span>
     <span class="spacer"></span>
+    <button id="musicBtn" title="Musik an/aus (N)">🎵</button>
     <button id="muteBtn" title="Ton an/aus (M)">🔊</button>
     <input id="volume" type="range" min="0" max="1" step="0.05" title="Lautstärke" aria-label="Lautstärke">
     <button id="speedBtn" title="Spielgeschwindigkeit">⏩ 1×</button>
@@ -105,7 +106,7 @@
         Linksklick: bauen / auswählen<br>
         Rechtsklick oder Esc: Auswahl aufheben<br>
         Tasten 1–5: Turm wählen · U: verbessern · S: verkaufen<br>
-        Leertaste: nächste Welle · P: Pause · M: Ton an/aus
+        Leertaste: nächste Welle · P: Pause · M: Ton an/aus · N: Musik an/aus
       </div>
     </div>
   </div>
@@ -153,8 +154,8 @@
   // ---------- Sound (Web Audio, synthetisch – keine Dateien nötig) ----------
   const sfx = (() => {
     let ac = null, master = null, noiseBuf = null;
-    let muted = false, volume = 0.5;
-    try { const s = JSON.parse(localStorage.getItem('td-sound')); if (s) { muted = !!s.muted; volume = s.volume ?? 0.5; } } catch {}
+    let muted = false, volume = 0.5, musicOn = true;
+    try { const s = JSON.parse(localStorage.getItem('td-sound')); if (s) { muted = !!s.muted; volume = s.volume ?? 0.5; musicOn = s.musicOn ?? true; } } catch {}
     const lastPlayed = {};
 
     function ensure() {
@@ -165,6 +166,11 @@
       master = ac.createGain();
       master.gain.value = muted ? 0 : volume;
       master.connect(ac.destination);
+      musicGain = ac.createGain();
+      musicGain.gain.value = 0;
+      musicGain.connect(master);
+      setInterval(scheduleMusic, 25);
+      updateMusicGain();
       noiseBuf = ac.createBuffer(1, ac.sampleRate, ac.sampleRate);
       const d = noiseBuf.getChannelData(0);
       for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
@@ -172,8 +178,8 @@
     }
 
     // Ton mit Frequenz-Rampe und Lautstärke-Hüllkurve
-    function tone({ type = 'square', f1, f2 = f1, dur = 0.1, vol = 0.2, delay = 0 }) {
-      const t = ac.currentTime + delay;
+    function tone({ type = 'square', f1, f2 = f1, dur = 0.1, vol = 0.2, delay = 0, at, out = master }) {
+      const t = at ?? ac.currentTime + delay;
       const o = ac.createOscillator(), g = ac.createGain();
       o.type = type;
       o.frequency.setValueAtTime(f1, t);
@@ -181,12 +187,12 @@
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(vol, t + 0.005);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      o.connect(g).connect(master);
+      o.connect(g).connect(out);
       o.start(t); o.stop(t + dur + 0.02);
     }
 
-    function noise({ dur = 0.2, vol = 0.3, freq = 1000, q = 1, type = 'lowpass', freqEnd, delay = 0 }) {
-      const t = ac.currentTime + delay;
+    function noise({ dur = 0.2, vol = 0.3, freq = 1000, q = 1, type = 'lowpass', freqEnd, delay = 0, at, out = master }) {
+      const t = at ?? ac.currentTime + delay;
       const src = ac.createBufferSource(), flt = ac.createBiquadFilter(), g = ac.createGain();
       src.buffer = noiseBuf;
       flt.type = type; flt.Q.value = q;
@@ -194,7 +200,7 @@
       if (freqEnd) flt.frequency.exponentialRampToValueAtTime(freqEnd, t + dur);
       g.gain.setValueAtTime(vol, t);
       g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-      src.connect(flt).connect(g).connect(master);
+      src.connect(flt).connect(g).connect(out);
       src.start(t); src.stop(t + dur + 0.02);
     }
 
@@ -228,13 +234,84 @@
       lastPlayed[name] = now;
       SOUNDS[name]();
     }
-    function save() { try { localStorage.setItem('td-sound', JSON.stringify({ muted, volume })); } catch {} }
+
+    // ---------- Hintergrundmusik (prozedural, Schritt-Sequenzer) ----------
+    // Modi: 'calm' zwischen den Wellen, 'wave' während einer Welle, 'boss' bei Bosswellen, 'off' bei Pause/Game Over
+    let musicGain = null, musicMode = 'off', nextStepTime = 0, step = 0;
+    const midi = n => 440 * Math.pow(2, (n - 69) / 12);
+    // Akkorde als MIDI-Grundton + Intervalle; je ein Takt (16 Sechzehntel)
+    const SONGS = {
+      calm: { bpm: 80,  chords: [[57, [0, 3, 7]], [53, [0, 4, 7]], [48, [0, 4, 7]], [55, [0, 4, 7]]] },          // Am F C G
+      wave: { bpm: 112, chords: [[57, [0, 3, 7]], [53, [0, 4, 7]], [48, [0, 4, 7]], [55, [0, 4, 7]]] },
+      boss: { bpm: 124, chords: [[57, [0, 3, 7]], [57, [0, 3, 6]], [53, [0, 4, 7]], [52, [0, 4, 7, 10]]] },      // Am Am° F E7
+    };
+    const ARP = [0, 1, 2, 1, 2, 3, 2, 1];
+    const MELODY = [ // Tonleiterstufen relativ zum Akkord-Grundton, null = Pause
+      [12, null, 15, null, 19, null, 17, 15, 12, null, null, 10, 12, null, null, null],
+      [12, null, 16, null, 19, null, 16, null, 14, null, 12, null, null, null, 7, null],
+    ];
+
+    function scheduleMusic() {
+      if (!ac || musicMode === 'off' || !musicOn) return;
+      const song = SONGS[musicMode], sixteenth = 60 / song.bpm / 4;
+      if (nextStepTime < ac.currentTime) nextStepTime = ac.currentTime + 0.05;
+      while (nextStepTime < ac.currentTime + 0.15) {
+        playStep(song, step, nextStepTime, sixteenth);
+        nextStepTime += sixteenth;
+        step = (step + 1) % (16 * song.chords.length * 2);
+      }
+    }
+
+    function playStep(song, st, t, len) {
+      const bar = Math.floor(st / 16) % song.chords.length, s16 = st % 16;
+      const [root, iv] = song.chords[bar];
+      const out = musicGain, calm = musicMode === 'calm', boss = musicMode === 'boss';
+      // Flächen-Akkord am Taktanfang
+      if (s16 === 0) iv.slice(0, 3).forEach(i => tone({ type: 'triangle', f1: midi(root + i), dur: len * 16, vol: calm ? 0.05 : 0.035, at: t, out }));
+      // Bass
+      if (calm ? s16 % 8 === 0 : s16 % 4 === 0 || (boss && s16 % 2 === 0)) {
+        const oct = !calm && s16 % 8 === 4 ? 12 : 0;
+        tone({ type: boss ? 'sawtooth' : 'triangle', f1: midi(root - 24 + oct), dur: len * (calm ? 7 : 2), vol: calm ? 0.12 : 0.1, at: t, out });
+      }
+      // Arpeggio
+      if (calm ? s16 % 4 === 2 : s16 % 2 === 0) {
+        const n = root + 12 + iv[ARP[(s16 / 2 | 0) % ARP.length] % iv.length];
+        tone({ type: calm ? 'sine' : 'square', f1: midi(n), dur: len * 1.6, vol: calm ? 0.05 : 0.025, at: t, out });
+      }
+      // Melodie (nur in Wellen), jede zweite Runde der Progression
+      if (!calm && Math.floor(st / (16 * song.chords.length)) % 2 === 1) {
+        const m = MELODY[bar % 2][s16];
+        if (m != null) tone({ type: 'triangle', f1: midi(root + m + (boss ? -12 : 0)), dur: len * 1.8, vol: 0.05, at: t, out });
+      }
+      // Schlagzeug
+      if (!calm) {
+        if (s16 % 8 === 0 || (boss && s16 === 10)) tone({ type: 'sine', f1: 130, f2: 40, dur: 0.15, vol: 0.25, at: t, out });
+        if (s16 % 8 === 4) noise({ dur: 0.12, vol: 0.08, freq: 1800, type: 'bandpass', q: 0.8, at: t, out });
+        if (s16 % 2 === 0) noise({ dur: 0.03, vol: s16 % 4 === 2 ? 0.04 : 0.02, freq: 7000, type: 'highpass', at: t, out });
+      }
+    }
+
+    function updateMusicGain() {
+      if (!musicGain) return;
+      const target = musicOn && musicMode !== 'off' ? 0.6 : 0;
+      musicGain.gain.setTargetAtTime(target, ac.currentTime, 0.4);
+    }
+    function setMusicMode(mode) {
+      if (mode === musicMode) return;
+      // beim Wechsel wieder am Anfang eines Taktes einsetzen
+      if (mode !== 'off') step = Math.ceil(step / 16) * 16 % (16 * SONGS[mode].chords.length * 2);
+      musicMode = mode;
+      updateMusicGain();
+    }
+    function save() { try { localStorage.setItem('td-sound', JSON.stringify({ muted, volume, musicOn })); } catch {} }
     function apply() { if (master) master.gain.value = muted ? 0 : volume; save(); }
     return {
       play, unlock: ensure,
       get muted() { return muted; }, get volume() { return volume; },
       toggleMute() { muted = !muted; apply(); if (!muted) play('click'); return muted; },
       setVolume(v) { volume = v; if (v > 0) muted = false; apply(); },
+      setMusicMode, get musicOn() { return musicOn; },
+      toggleMusic() { musicOn = !musicOn; updateMusicGain(); save(); return musicOn; },
     };
   })();
 
@@ -780,7 +857,10 @@
   function updateSoundUi() {
     $('muteBtn').textContent = sfx.muted || sfx.volume === 0 ? '🔇' : sfx.volume < 0.4 ? '🔉' : '🔊';
     $('volume').value = sfx.volume;
+    $('musicBtn').style.opacity = sfx.musicOn ? 1 : 0.4;
+    $('musicBtn').setAttribute('aria-pressed', sfx.musicOn);
   }
+  $('musicBtn').onclick = () => { sfx.unlock(); sfx.toggleMusic(); updateSoundUi(); };
   function toggleMute() { sfx.toggleMute(); updateSoundUi(); }
   $('muteBtn').onclick = toggleMute;
   $('volume').oninput = ev => { sfx.setVolume(+ev.target.value); updateSoundUi(); };
@@ -804,6 +884,7 @@
       case ' ': ev.preventDefault(); startWave(); break;
       case 'p': case 'P': togglePause(); break;
       case 'm': case 'M': toggleMute(); break;
+      case 'n': case 'N': sfx.toggleMusic(); updateSoundUi(); break;
       case 'u': case 'U': upgradeTower(state.selectedTower); break;
       case 's': case 'S': sellTower(state.selectedTower); break;
     }
@@ -825,6 +906,7 @@
         if (g !== String(state.gold)) { renderShop(); if (state.selectedTower) renderInfo(); }
       }
     }
+    sfx.setMusicMode(state.over || state.paused ? 'off' : !state.waveActive ? 'calm' : state.wave % 10 === 0 ? 'boss' : 'wave');
     draw();
     requestAnimationFrame(loop);
   }
